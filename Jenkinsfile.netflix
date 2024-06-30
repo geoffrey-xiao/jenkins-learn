@@ -6,6 +6,7 @@ pipeline{
     }
     environment {
         SCANNER_HOME=tool 'sonar-scanner'
+        DOCKERHUB_CREDENTIALS = credentials('docker-token')
     }
     stages {
         stage('clean workspace'){
@@ -40,32 +41,56 @@ pipeline{
                 }
             }
         }
-        // stage('OWASP FS SCAN') {
-        //     steps {
-        //         dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
-        //         dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-        //     }
-        // }
-        stage('TRIVY FS SCAN') {
-            steps {
-                sh "trivy fs . > trivyfs.txt"
-            }
-        }
+        
         stage('Install Dependencies') {
             steps {
                 sh "npm install"
             }
         }
-    }
-    post {
-     always {
-        emailext attachLog: true,
-            subject: "'${currentBuild.result}'",
-            body: "Project: ${env.JOB_NAME}<br/>" +
-                "Build Number: ${env.BUILD_NUMBER}<br/>" +
-                "URL: ${env.BUILD_URL}<br/>",
-            to: 'geoffreyxiao25@gmail.com',
-            attachmentsPattern: 'trivyfs.txt'
+        stage('OWASP FS SCAN') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        stage('TRIVY FS SCAN') {
+            steps {
+                sh "trivy fs . > trivyfs.txt"
+            }
+        }
+      
+        
+        stage("Docker Build & Push"){
+            steps{
+                script{
+                   withDockerRegistry(credentialsId: 'docker'){
+                       sh "docker build --build-arg TMDB_V3_API_KEY=e5b12cdb3030175c383875c26b27c0a9 -t netflix ."
+                       sh "docker tag netflix geoffreyxiao/netflix-jenkins:latest "
+                       sh "docker push geoffreyxiao/netflix-jenkins:latest "
+                    }
+                }
+            }
+        }
+        stage("TRIVY"){
+            steps{
+                sh "trivy image geoffreyxiao/netflix-jenkins:latest > trivyimage.txt"
+            }
+        }  
+        stage('Deploy to container'){
+            steps{
+                sh 'docker run -d --name netflix -p 8081:80 geoffreyxiao/netflix-jenkins:latest'
+            }
         }
     }
+    // post {
+    //  always {
+    //     emailext attachLog: true,
+    //         subject: "'${currentBuild.result}'",
+    //         body: "Project: ${env.JOB_NAME}<br/>" +
+    //             "Build Number: ${env.BUILD_NUMBER}<br/>" +
+    //             "URL: ${env.BUILD_URL}<br/>",
+    //         to: 'geoffreyxiao25@gmail.com',
+    //         attachmentsPattern: 'trivyfs.txt,trivyimage.txt'
+    //     }
+    // }
 }
